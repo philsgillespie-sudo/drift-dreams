@@ -1,0 +1,63 @@
+{
+  "frames": {
+    "tower_n": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 472,
+        "h": 556
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 472,
+        "h": 556
+      },
+      "sourceSize": {
+        "w": 472,
+        "h": 556
+      },
+      "pivot": {
+        "x": 0.915254,
+        "y": 0.557554
+      }
+    },
+    "tower_s": {
+      "frame": {
+        "x": 472,
+        "y": 0,
+        "w": 472,
+        "h": 556
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 472,
+        "h": 556
+      },
+      "sourceSize": {
+        "w": 472,
+        "h": 556
+      },
+      "pivot": {
+        "x": 0.101695,
+        "y": 0.902878
+      }
+    }
+  },
+  "meta": {
+    "app": "spritegen",
+    "version": "1.0",
+    "image": "bridge_towers.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 944,
+      "h": 556
+    },
+    "scale": "1"
+  }
+}

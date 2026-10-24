@@ -1,0 +1,63 @@
+{
+  "frames": {
+    "rail_n": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 94
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 94
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 94
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.319149
+      }
+    },
+    "rail_s": {
+      "frame": {
+        "x": 128,
+        "y": 0,
+        "w": 128,
+        "h": 94
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 94
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 94
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.319149
+      }
+    }
+  },
+  "meta": {
+    "app": "spritegen",
+    "version": "1.0",
+    "image": "bridge_rails.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 256,
+      "h": 94
+    },
+    "scale": "1"
+  }
+}
