@@ -13,21 +13,20 @@ from car import CAR_RADIUS
 from .events import PropKnocked, PropSmashed
 
 ACTIVE_RANGE = 900     # props further than this from every player are left alone
-SMASH_SPEED = 60       # a player must be at least this fast to score a smash
+SMASH_SPEED = 60       # a player must be at least this fast to smash a prop
 
 
 @dataclass(frozen=True)
 class PropType:
     radius: float
-    points: int            # combo points for smashing it
     keep: float            # share of its speed a car keeps when it ploughs through one
     sprays: bool = False   # bursts into a fountain when smashed
 
 
 PROP_TYPES = {
-    "cone": PropType(radius=5, points=40, keep=0.97),
-    "hydrant": PropType(radius=5, points=120, keep=0.85, sprays=True),
-    "bin": PropType(radius=6, points=60, keep=0.85),
+    "cone": PropType(radius=5, keep=0.97),
+    "hydrant": PropType(radius=5, keep=0.85, sprays=True),
+    "bin": PropType(radius=6, keep=0.85),
 }
 
 
@@ -49,9 +48,8 @@ class PropSystem:
         self.world, self.bus = world, bus
         self.props = [Prop(k, p) for k, p in spots]
 
-    def update(self, dt, players, grid, scoring):
-        """players: the players' cars. grid: core.SpatialHash of the cars. scoring: whether smashes
-        count toward the combo."""
+    def update(self, dt, players, grid):
+        """players: the players' cars. grid: core.SpatialHash of the cars."""
         near = [(p.pos.x, p.pos.y) for p in players]
         for prop in self.props:
             x, y = prop.pos
@@ -71,7 +69,7 @@ class PropSystem:
                     speed = car.vel.length()
                     self.bus.publish(PropKnocked(prop, car, speed))
                     car.vel *= prop.type.keep
-                    if car in players and not prop.hit and speed > SMASH_SPEED and scoring:
+                    if car in players and not prop.hit and speed > SMASH_SPEED:
                         prop.hit = True
                         self.bus.publish(PropSmashed(prop, car))
             if prop.vel.length_squared() > 1:

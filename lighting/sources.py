@@ -25,6 +25,7 @@ class LitScene:
     """The visible things that can carry lights this frame."""
     lamps: list = field(default_factory=list)   # (pos, angle) of street lamps
     cars: list = field(default_factory=list)    # cars that are driving (parked ones stay dark)
+    time: float = 0.0                           # seconds; for lights that flash
 
 
 class LightSource(Protocol):
@@ -81,3 +82,37 @@ class CarLamps:
             for side in (r, -r):
                 yield Light("headlamp", nose + side, self.LAMP_Z, emissive=True)
                 yield Light("tail_lamp", tail + side, self.LAMP_Z, emissive=True)
+
+
+class Sirens:
+    """Police lightbars (cars with `siren` set): red and blue in turn, washing the road around the car."""
+    FLASH = 0.18          # seconds each side stays lit
+    SPREAD, BACK, BAR_Z = 3, 2, 10.5   # lamps apart from the middle, behind the car's centre, above the road
+
+    @classmethod
+    def lit_side(cls, t):
+        """0: the red (left) lamp is lit, 1: the blue (right) one."""
+        return int(t / cls.FLASH) % 2
+
+    @staticmethod
+    def lamps(car):
+        """World positions of the left and right lamps on the roof."""
+        f = car.fwd()
+        r = V(-f.y, f.x) * Sirens.SPREAD
+        roof = car.pos - f * Sirens.BACK
+        return roof - r, roof + r
+
+    def glows(self):
+        return {"siren_red_pool": make_glow(34 * ZOOM, (255, 40, 50), GROUND),
+                "siren_blue_pool": make_glow(34 * ZOOM, (50, 90, 255), GROUND),
+                "siren_red": make_glow(6 * ZOOM, (255, 70, 70)),
+                "siren_blue": make_glow(6 * ZOOM, (90, 140, 255))}
+
+    def lights(self, scene, darkness):
+        side = self.lit_side(scene.time)
+        color = ("red", "blue")[side]
+        for car in scene.cars:
+            if car.siren:
+                lamp = self.lamps(car)[side]
+                yield Light(f"siren_{color}_pool", lamp)
+                yield Light(f"siren_{color}", lamp, self.BAR_Z, emissive=True)

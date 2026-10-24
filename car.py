@@ -41,6 +41,7 @@ def heading_of(v):
 
 class Car:
     parked = False      # parked cars sit still until shoved, and don't push street furniture about
+    siren = False       # a police lightbar flashing on the roof
 
     def __init__(self, pos, heading, stack):
         self.stack = stack  # IsoStack in this car's paint

@@ -1,5 +1,5 @@
 """Cars against the world and against each other. Reports impacts as events; what they mean (sound,
-shake, lost combos) is up to the systems listening."""
+shake, rams in a chase) is up to the systems listening."""
 import random
 
 from car import CAR_RADIUS

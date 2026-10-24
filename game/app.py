@@ -1,7 +1,7 @@
 """The application: windows, main loop and the wiring between the game's parts.
 
 Player 1 plays in the main window; a second player gets a window of their own (render.SecondWindow),
-on the second monitor when there is one.
+on the second monitor when there is one. Two players play cops and robbers (scenes.ChaseScene).
 """
 import gc
 from collections import deque
@@ -10,19 +10,21 @@ import pygame
 
 from core import EventBus
 from input import InputManager, actions
-from lighting import CarLamps, DayNightCycle, LightingRenderer, StreetLamps
+from lighting import CarLamps, DayNightCycle, LightingRenderer, Sirens, StreetLamps
 from sound import SoundManager
 from world import World
 
 from . import config
 from .assets import Assets
+from .chase import Announcer, Livery
 from .events import Message
 from .feedback import Feedback
-from .render import Hud, MenuView, Popups, SecondWindow, Text, WorldRenderer
-from .scenes import DriveScene, MenuScene
+from .render import ChaseHud, Hud, MenuView, Popups, SecondWindow, Text, WorldRenderer
+from .scenes import ChaseScene, DriveScene, MenuScene
 from .session import Session
 
 SMOOTHING = 4     # frames the step time is averaged over
+TITLE = "Cops & Robbers"
 
 
 class FrameTimer:
@@ -44,7 +46,7 @@ class Game:
     def __init__(self, start_hour=config.START_HOUR, vsync=True, players=1):
         SoundManager.pre_init()
         pygame.init()
-        pygame.display.set_caption("Drift Dreams")
+        pygame.display.set_caption(TITLE)
         self.screen, self.vsync = self._open_window(vsync)
         self.timer = FrameTimer(config.MAX_FPS if self.vsync else config.FPS)
         self.text = Text(self.screen)
@@ -60,7 +62,8 @@ class Game:
         self.bus = EventBus()
         self.session = Session(self.assets, self.world, self.bus, DayNightCycle(start_hour), size)
         self.feedback = Feedback(self.bus, self.session.players, self.sound, self.input.rumble)
-        lighting = LightingRenderer(size, [StreetLamps(), CarLamps()])
+        self.announcer = Announcer(self.bus, self.sound, self.input.rumble)
+        lighting = LightingRenderer(size, [StreetLamps(), CarLamps(), Sirens()])
         self.renderer = WorldRenderer(self.assets, self.world, self.session, lighting)
         self.hud = Hud(self.text, self.world, self.session, self.input)
         self.menu = MenuView(self.text, self.assets.player_stacks)
@@ -68,11 +71,11 @@ class Game:
         self.second = None       # player 2's window, while there is a player 2
 
         self.paints = list(config.PLAYER_PAINTS)
-        self.started = False
+        livery = Livery(self.bus, self.assets.police_stack, self.paint_stack)
         # tests can drive the players with functions(game) -> DriveControls
         self.autopilot = None
         self.autopilot2 = None
-        self.scenes = {s.name: s for s in (MenuScene(), DriveScene())}
+        self.scenes = {s.name: s for s in (MenuScene(), DriveScene(), ChaseScene(livery, ChaseHud(self.text)))}
         self.scene = None
         self.change_scene("menu")
         if players > 1:
@@ -103,12 +106,18 @@ class Game:
 
     # -- state ---------------------------------------------------------------------
     def change_scene(self, name):
+        if self.scene is not None:
+            self.scene.exit(self)
         self.scene = self.scenes[name]
         self.scene.enter(self)
 
+    def paint_stack(self, player):
+        """The car sprites in the paint this player picked."""
+        return self.assets.player_stacks[self.paints[player.paint]]
+
     def cycle_paint(self, player, step):
         player.paint = (player.paint + step) % len(self.paints)
-        player.car.stack = self.assets.player_stacks[self.paints[player.paint]]
+        player.car.stack = self.paint_stack(player)
 
     @property
     def players(self):
@@ -120,9 +129,9 @@ class Game:
             return
         player = self.session.add_player()
         self.popups.append(Popups(self.bus, player.car))
-        self.second = SecondWindow((config.SCREEN_W, config.SCREEN_H), "Drift Dreams - Player 2")
+        self.second = SecondWindow((config.SCREEN_W, config.SCREEN_H), f"{TITLE} - Player 2")
         self.input.players = 2
-        self.scene.enter(self)
+        self.scene.players_changed(self)
 
     def remove_player(self):
         if len(self.players) < 2:
@@ -132,6 +141,7 @@ class Game:
         self.second.close()
         self.second = None
         self.input.players = 1
+        self.scene.players_changed(self)
 
     @property
     def state(self):
@@ -144,10 +154,6 @@ class Game:
     @property
     def paint(self):
         return self.players[0].paint
-
-    @property
-    def score(self):
-        return self.session.combo.score
 
     @property
     def daynight(self):

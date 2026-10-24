@@ -6,13 +6,15 @@ per kind draws it. A new kind of thing on the map is one source and one drawer.
 from operator import itemgetter
 
 from iso import ZOOM, blit_anchored
-from lighting import LitScene
+from lighting import LitScene, Sirens
 
 from .. import config
 
 SCENERY_TALLEST = 64 * ZOOM     # how far above its ground a tree or lamp can reach
 FADED_ALPHA = 96                # buildings between the camera and the view's player
 GHOST_ALPHA = 110               # that player drawn over them, so it never vanishes
+LIGHTBAR = ((255, 60, 60), (70, 120, 255))   # lit lamp colours, red then blue
+LIGHTBAR_OFF = ((90, 20, 24), (24, 36, 90))
 _ORDER = itemgetter(0, 1)
 
 
@@ -42,7 +44,7 @@ class WorldRenderer:
         buildings = self.draw_things(view, cam, things, focus)
         dn = self.session.daynight
         covered = self.covered
-        self.lighting.draw(view, cam, self.lit_scene(things), dn.ambient, dn.darkness,
+        self.lighting.draw(view, cam, self.lit_scene(things, self.session.time), dn.ambient, dn.darkness,
                            lambda light, s: covered(s, light.pos.x + light.pos.y, buildings))
 
     # -- what's on screen --------------------------------------------------------
@@ -82,9 +84,9 @@ class WorldRenderer:
         out += [(s.pos.x + s.pos.y + 6, 5, "smoke", s) for s in self.session.particles.smoke if visible(s.pos, 20)]
 
     @staticmethod
-    def lit_scene(things):
+    def lit_scene(things, time):
         """The lamps and driving cars among the visible things, for the lighting."""
-        scene = LitScene()
+        scene = LitScene(time=time)
         for _, _, kind, obj in things:
             if kind == "static" and obj[0] == "lamp":
                 scene.lamps.append((obj[1], obj[2]))
@@ -121,7 +123,7 @@ class WorldRenderer:
                 hiding.add(obj.lot)
 
         self.world.draw_cables(view, cam, "back")
-        frame = _Frame(view, cam, view.get_rect(), hiding)
+        frame = _Frame(view, cam, view.get_rect(), hiding, self.session.time)
         drawers = self.drawers
         for thing in things:
             drawers[thing[2]](frame, thing)
@@ -169,6 +171,12 @@ class WorldRenderer:
     def _draw_car(frame, thing):
         car = thing[3]
         blit_anchored(frame.view, car.image(), frame.cam.to_screen(car.pos))
+        if car.siren:
+            lit = Sirens.lit_side(frame.time)
+            for side, lamp in enumerate(Sirens.lamps(car)):
+                s = frame.cam.to_screen(lamp, Sirens.BAR_Z)
+                color = LIGHTBAR[side] if side == lit else LIGHTBAR_OFF[side]
+                frame.view.fill(color, (s.x - ZOOM, s.y - ZOOM, 2 * ZOOM, 2 * ZOOM))
 
     def _draw_smoke(self, frame, thing):
         s = thing[3]
@@ -181,8 +189,8 @@ class WorldRenderer:
 
 class _Frame:
     """What the drawers share while drawing one frame."""
-    __slots__ = ("view", "cam", "screen_rect", "hiding", "buildings")
+    __slots__ = ("view", "cam", "screen_rect", "hiding", "buildings", "time")
 
-    def __init__(self, view, cam, screen_rect, hiding):
-        self.view, self.cam, self.screen_rect, self.hiding = view, cam, screen_rect, hiding
+    def __init__(self, view, cam, screen_rect, hiding, time):
+        self.view, self.cam, self.screen_rect, self.hiding, self.time = view, cam, screen_rect, hiding, time
         self.buildings = []

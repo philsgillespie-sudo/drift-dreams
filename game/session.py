@@ -1,7 +1,7 @@
 """The running open world: the players' cars, traffic, props and effects, stepped once a frame.
 
-The session is the same behind the title screen and the drive; scenes only change what steers the
-players, how fast the clock runs and whether moves score. One or two players share it.
+The session is the same behind the title screen, the free drive and the chase; scenes only change what
+steers the players, how fast the clock runs and what the rules are. One or two players share it.
 """
 import math
 
@@ -14,7 +14,6 @@ from traffic import Traffic
 
 from . import config
 from .collisions import Collisions
-from .combo import Combo
 from .effects import Particles, TyreEffects
 from .events import PlayerPlaced
 from .players import Player
@@ -36,7 +35,6 @@ class Session:
         self.tyres = TyreEffects(world, self.particles)
         self.players = []
         self.player_cars = []
-        self.scoring = False     # whether drifts, near misses and smashes count
         self.time = 0.0
         self.add_player()
 
@@ -44,10 +42,6 @@ class Session:
     def player(self):
         """Player 1's car."""
         return self.players[0].car
-
-    @property
-    def combo(self):
-        return self.players[0].combo
 
     @property
     def camera(self):
@@ -58,7 +52,7 @@ class Session:
         index = len(self.players)
         paint = list(config.PLAYER_PAINTS)[index]
         car = Car(self.world.start, math.pi / 2, self.assets.player_stacks[paint])
-        player = Player(index, car, Combo(self.bus, self.daynight, car), IsoCamera(self.view_size))
+        player = Player(index, car, IsoCamera(self.view_size))
         self.players.append(player)
         self.player_cars = [p.car for p in self.players]
         if index == 0:
@@ -74,7 +68,7 @@ class Session:
     def remove_player(self):
         """The last player leaves (player 1 always stays)."""
         if len(self.players) > 1:
-            self.players.pop().combo.detach()
+            self.players.pop()
             self.player_cars = [p.car for p in self.players]
 
     def cars(self):
@@ -104,10 +98,7 @@ class Session:
         for car in traffic.cars:
             if car.drifting or car.dazed > 0:
                 self.tyres.update(car)
-        self.props.update(dt, players, self.grid, self.scoring)
-        if self.scoring:
-            for p in self.players:
-                p.combo.update(dt, traffic.cars)
+        self.props.update(dt, players, self.grid)
         self.particles.update(dt)
 
     # -- putting a player somewhere ------------------------------------------------
@@ -117,6 +108,15 @@ class Session:
         p.vel, p.angvel, p.drifting, p.prev_wheels = V(), 0.0, False, None
         player.camera.jump_to(p.pos)
         self.bus.publish(PlayerPlaced(p))
+
+    def line_up(self, lead, chaser, gap):
+        """`lead` at the start, `chaser` on the road `gap` behind them."""
+        self.place(lead, self.world.start, math.pi / 2)
+        car = lead.car
+        pos, heading = self.world.nearest_road(car.pos - car.fwd() * gap)
+        if abs(math.remainder(heading - car.heading, math.tau)) > math.pi / 2:
+            heading += math.pi
+        self.place(chaser, pos, heading)
 
     def to_road(self, player=None):
         player = player or self.players[0]

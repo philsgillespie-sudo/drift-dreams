@@ -5,7 +5,7 @@
 Runs with SDL's dummy video and audio drivers, so no window opens. Frame time is update + draw
 (the event pump is timed apart: SDL device handling can stall it). The player is put back on the
 road every 400 frames; those teleport frames bake a screenful of ground and are left out of "max".
---players 2 adds player 2 (drawn to their own window too), driving a different line.
+--players 2 adds player 2 (drawn to their own window too), driving a different line, and runs a chase.
 --cprofile also prints the 30 costliest calls.
 """
 import argparse
@@ -53,8 +53,7 @@ def main():
     t0 = time.perf_counter()
     g = Game(start_hour=args.hour, players=args.players)
     print(f"startup {time.perf_counter() - t0:.2f}s")
-    g.change_scene("drive")
-    g.started = True
+    g.change_scene("chase" if args.players > 1 else "drive")
     g.autopilot = pilot
     g.autopilot2 = pilot2
 

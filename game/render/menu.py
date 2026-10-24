@@ -1,4 +1,4 @@
-"""The title screen over the live city: the paint picker and how to play."""
+"""The title screen over the live city: the getaway car's paint picker and how to play."""
 import pygame
 
 from iso import ZOOM
@@ -32,16 +32,16 @@ class MenuView:
                                          (ax * PREVIEW_SCALE, ay * PREVIEW_SCALE))
         return img
 
-    def draw(self, scr, t, paints, choice, started, device, player, players):
+    def draw(self, scr, t, paints, choice, device, player, players):
         """One player's title screen on `scr`. device: what steers them (None: nothing yet).
         player: their index; players: how many are playing."""
         text = lambda *a, **k: self.text.draw(*a, dst=scr, **k)  # noqa: E731
         scr.blit(self.shade, (0, 0))
-        title = "DRIFT DREAMS"
+        title = "COPS & ROBBERS"
         for k, col in enumerate(((255, 90, 170), (90, 220, 255))):
             text(title, "big", col, (SCREEN_W / 2 + (k * 2 - 1) * 3, 130), "center", shadow=False)
         text(title, "big", (255, 245, 255), (SCREEN_W / 2, 130), "center", shadow=False)
-        text("an open-world drift through the city", "normal", (230, 220, 255), (SCREEN_W / 2, 200), "center")
+        text("a two-player chase through the city", "normal", (230, 220, 255), (SCREEN_W / 2, 200), "center")
 
         scr.blit(self.band, (0, 245))
         n = len(paints)
@@ -51,8 +51,8 @@ class MenuView:
             if k == choice:
                 pygame.draw.rect(scr, (255, 214, 60), pygame.Rect(x - 62, 262, 124, 120), 3, 10)
             scr.blit(big, (x - ax, 336 - ay))
-        text(paints[choice].upper(), "normal", (255, 214, 60), (SCREEN_W / 2, 400), "center")
-        verb = "drive" if not started else "keep driving"
+        text(f"GETAWAY CAR: {paints[choice].upper()}", "normal", (255, 214, 60), (SCREEN_W / 2, 400), "center")
+        verb = "start the chase" if players > 1 else "free drive"
         pad = device is not None and device.startswith("Controller")
         quit_ = "leave" if player else "quit"
         if pad:
@@ -70,9 +70,9 @@ class MenuView:
             text(f"PLAYER {player + 1}", "mid", PLAYER_COLORS[player], (24, 20), shadow=True)
             text("2 / F2: player 2 leaves", "small", (200, 200, 230), (SCREEN_W / 2, 650), "center")
         else:
-            text("Second player: START on another pad, or press 2", "small", (200, 200, 230),
+            text("A chase needs two: START on another pad, or press 2", "small", (255, 214, 60),
                  (SCREEN_W / 2, 650), "center")
-        text("Hold handbrake while turning to drift. Drifts, near misses and smashes chain into combos.",
+        text("One of you robs, one of you chases. The cop busts the robber by staying on their bumper or ramming.",
              "small", (220, 210, 240), (SCREEN_W / 2, 530), "center")
-        text("Crashing or drifting off the tarmac loses the combo.",
+        text("The robber wins by outlasting the clock or getting far enough away. Swap each round; first to 3.",
              "small", (220, 210, 240), (SCREEN_W / 2, 556), "center")

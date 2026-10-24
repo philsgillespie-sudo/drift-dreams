@@ -40,6 +40,7 @@ class Assets:
         progress("Painting cars...")
         coupe = IsoStack(stack_slices(car_f, "coupe"), steps=72)
         self.player_stacks = {name: coupe.recolored(paint_map(*p)) for name, p in config.PLAYER_PAINTS.items()}
+        self.police_stack = coupe.recolored(paint_map(*config.POLICE_PAINT))
         models = [IsoStack(stack_slices(car_f, m), steps=72) for m in config.TRAFFIC_MODELS]
         self.traffic_stacks = [s.recolored(paint_map(p)) for s in models for p in config.TRAFFIC_PAINTS]
         self.prop_stacks = {k: IsoStack(stack_slices(prop_f, k), steps=24) for k in PROP_TYPES}
