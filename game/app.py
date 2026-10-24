@@ -1,4 +1,8 @@
-"""The application: window, main loop and the wiring between the game's parts."""
+"""The application: windows, main loop and the wiring between the game's parts.
+
+Player 1 plays in the main window; a second player gets a window of their own (render.SecondWindow),
+on the second monitor when there is one.
+"""
 import gc
 from collections import deque
 
@@ -6,7 +10,6 @@ import pygame
 
 from core import EventBus
 from input import InputManager, actions
-from iso import IsoCamera
 from lighting import CarLamps, DayNightCycle, LightingRenderer, StreetLamps
 from sound import SoundManager
 from world import World
@@ -15,7 +18,7 @@ from . import config
 from .assets import Assets
 from .events import Message
 from .feedback import Feedback
-from .render import Hud, MenuView, Popups, Text, WorldRenderer
+from .render import Hud, MenuView, Popups, SecondWindow, Text, WorldRenderer
 from .scenes import DriveScene, MenuScene
 from .session import Session
 
@@ -38,7 +41,7 @@ class FrameTimer:
 
 
 class Game:
-    def __init__(self, start_hour=config.START_HOUR, vsync=True):
+    def __init__(self, start_hour=config.START_HOUR, vsync=True, players=1):
         SoundManager.pre_init()
         pygame.init()
         pygame.display.set_caption("Drift Dreams")
@@ -55,22 +58,25 @@ class Game:
 
         size = (config.SCREEN_W, config.SCREEN_H)
         self.bus = EventBus()
-        self.camera = IsoCamera(size)
-        self.session = Session(self.assets, self.world, self.bus, DayNightCycle(start_hour), self.camera)
-        self.feedback = Feedback(self.bus, self.session.player, self.sound, self.camera, self.input.rumble)
-        self.popups = Popups(self.bus)
+        self.session = Session(self.assets, self.world, self.bus, DayNightCycle(start_hour), size)
+        self.feedback = Feedback(self.bus, self.session.players, self.sound, self.input.rumble)
         lighting = LightingRenderer(size, [StreetLamps(), CarLamps()])
         self.renderer = WorldRenderer(self.assets, self.world, self.session, lighting)
-        self.hud = Hud(self.screen, self.text, self.world, self.session, self.input, self.popups)
-        self.menu = MenuView(self.screen, self.text, self.assets.player_stacks)
+        self.hud = Hud(self.text, self.world, self.session, self.input)
+        self.menu = MenuView(self.text, self.assets.player_stacks)
+        self.popups = [Popups(self.bus, self.session.player)]   # one per player's screen
+        self.second = None       # player 2's window, while there is a player 2
 
         self.paints = list(config.PLAYER_PAINTS)
-        self.paint = 0
         self.started = False
-        self.autopilot = None    # tests can drive the player with a function(game) -> DriveControls
+        # tests can drive the players with functions(game) -> DriveControls
+        self.autopilot = None
+        self.autopilot2 = None
         self.scenes = {s.name: s for s in (MenuScene(), DriveScene())}
         self.scene = None
         self.change_scene("menu")
+        if players > 1:
+            self.add_player()
 
         # everything loaded so far lives for the whole game: keep the garbage collector off it,
         # so its sweeps stay short and don't land as dropped frames
@@ -100,9 +106,32 @@ class Game:
         self.scene = self.scenes[name]
         self.scene.enter(self)
 
-    def cycle_paint(self, step):
-        self.paint = (self.paint + step) % len(self.paints)
-        self.session.player.stack = self.assets.player_stacks[self.paints[self.paint]]
+    def cycle_paint(self, player, step):
+        player.paint = (player.paint + step) % len(self.paints)
+        player.car.stack = self.assets.player_stacks[self.paints[player.paint]]
+
+    @property
+    def players(self):
+        return self.session.players
+
+    def add_player(self):
+        """Player 2 joins, in a window of their own."""
+        if len(self.players) > 1:
+            return
+        player = self.session.add_player()
+        self.popups.append(Popups(self.bus, player.car))
+        self.second = SecondWindow((config.SCREEN_W, config.SCREEN_H), "Drift Dreams - Player 2")
+        self.input.players = 2
+        self.scene.enter(self)
+
+    def remove_player(self):
+        if len(self.players) < 2:
+            return
+        self.session.remove_player()
+        self.popups.pop().detach()
+        self.second.close()
+        self.second = None
+        self.input.players = 1
 
     @property
     def state(self):
@@ -111,6 +140,10 @@ class Game:
     @property
     def time(self):
         return self.session.time
+
+    @property
+    def paint(self):
+        return self.players[0].paint
 
     @property
     def score(self):
@@ -135,31 +168,46 @@ class Game:
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 return False
+            if e.type == pygame.WINDOWCLOSE and getattr(e, "window", None) is not None:
+                if self.second is not None and e.window.id == self.second.id:
+                    self.remove_player()    # closing player 2's window: they leave
+                    continue
+                return False                # closing the main window quits
             pending += self.input.handle_event(e)
         pending += self.input.poll_actions()
-        for action in pending:
-            if not self.on_action(action):
+        for slot, action in pending:
+            if not self.on_action(slot, action):
                 return False
         for notice in self.input.take_notices():
             self.bus.publish(Message(notice))
         return True
 
-    def on_action(self, action):
-        """Returns False to quit."""
+    def on_action(self, slot, action):
+        """slot: whose device it came from. Returns False to quit."""
         if action in (actions.TIME_BACK, actions.TIME_FWD):
             self.session.daynight.skip(1 if action == actions.TIME_FWD else -1)
             return True
-        return self.scene.on_action(self, action)
+        return self.scene.on_action(self, slot, action)
 
     def update(self, dt):
         scene, s = self.scene, self.session
-        self.sound.update(dt, s.player, s.traffic.cars, listening=scene.listening)
+        self.sound.update(dt, s.player_cars, s.traffic.cars, listening=scene.listening)
         scene.update(self, dt)
         s.update(dt, scene.controls(self), scene.time_speed)
-        self.popups.update(dt)
-        self.camera.update(dt)
+        for popups in self.popups:
+            popups.update(dt)
+        for p in self.players:
+            p.camera.update(dt)
         scene.move_camera(self, dt)
 
     def draw(self):
-        self.renderer.draw(self.screen, self.camera)
-        self.scene.draw_overlay(self)
+        # Every view is drawn on the main window's surface: player 2's first, handed to their window,
+        # then player 1's. The ground chunks are RLE surfaces, which SDL re-encodes whenever one is
+        # blitted to a different surface than last time, so two target surfaces would cost a
+        # re-encode per chunk per view.
+        for player in reversed(self.players):
+            self.renderer.draw(self.screen, player.camera, player.car)
+            self.scene.draw_overlay(self, self.screen, player)
+            if player.index:
+                self.second.present(self.screen)
+        self.world.end_frame([p.camera for p in self.players])

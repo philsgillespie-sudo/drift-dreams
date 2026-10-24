@@ -12,8 +12,8 @@ from car import CAR_RADIUS
 
 from .events import PropKnocked, PropSmashed
 
-ACTIVE_RANGE = 900     # props further than this from the player are left alone
-SMASH_SPEED = 60       # the player must be at least this fast to score a smash
+ACTIVE_RANGE = 900     # props further than this from every player are left alone
+SMASH_SPEED = 60       # a player must be at least this fast to score a smash
 
 
 @dataclass(frozen=True)
@@ -49,11 +49,13 @@ class PropSystem:
         self.world, self.bus = world, bus
         self.props = [Prop(k, p) for k, p in spots]
 
-    def update(self, dt, player, grid, scoring):
-        """grid: core.SpatialHash of the cars. scoring: whether smashes count toward the combo."""
-        px, py = player.pos
+    def update(self, dt, players, grid, scoring):
+        """players: the players' cars. grid: core.SpatialHash of the cars. scoring: whether smashes
+        count toward the combo."""
+        near = [(p.pos.x, p.pos.y) for p in players]
         for prop in self.props:
-            if abs(prop.pos.x - px) > ACTIVE_RANGE or abs(prop.pos.y - py) > ACTIVE_RANGE:
+            x, y = prop.pos
+            if all(abs(x - px) > ACTIVE_RANGE or abs(y - py) > ACTIVE_RANGE for px, py in near):
                 continue
             lim = CAR_RADIUS + prop.radius
             for car in grid.near(prop.pos, lim):
@@ -69,9 +71,9 @@ class PropSystem:
                     speed = car.vel.length()
                     self.bus.publish(PropKnocked(prop, car, speed))
                     car.vel *= prop.type.keep
-                    if car is player and not prop.hit and speed > SMASH_SPEED and scoring:
+                    if car in players and not prop.hit and speed > SMASH_SPEED and scoring:
                         prop.hit = True
-                        self.bus.publish(PropSmashed(prop))
+                        self.bus.publish(PropSmashed(prop, car))
             if prop.vel.length_squared() > 1:
                 prop.pos += prop.vel * dt
                 prop.vel *= math.exp(-2.5 * dt)

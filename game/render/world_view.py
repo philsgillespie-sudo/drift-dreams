@@ -11,8 +11,8 @@ from lighting import LitScene
 from .. import config
 
 SCENERY_TALLEST = 64 * ZOOM     # how far above its ground a tree or lamp can reach
-FADED_ALPHA = 96                # buildings between the camera and the player
-GHOST_ALPHA = 110               # the player drawn over them, so it never vanishes
+FADED_ALPHA = 96                # buildings between the camera and the view's player
+GHOST_ALPHA = 110               # that player drawn over them, so it never vanishes
 _ORDER = itemgetter(0, 1)
 
 
@@ -33,12 +33,13 @@ class WorldRenderer:
             "smoke": self._draw_smoke,
         }
 
-    def draw(self, view, cam):
+    def draw(self, view, cam, focus):
+        """focus: the car this view follows (buildings in front of it turn see-through)."""
         view.fill(config.SEA)
         cam.begin()
         self.world.draw_ground(view, cam)
         things = self.visible_things(cam)
-        buildings = self.draw_things(view, cam, things)
+        buildings = self.draw_things(view, cam, things, focus)
         dn = self.session.daynight
         covered = self.covered
         self.lighting.draw(view, cam, self.lit_scene(things), dn.ambient, dn.darkness,
@@ -103,16 +104,16 @@ class WorldRenderer:
         return False
 
     # -- drawing -------------------------------------------------------------------
-    def draw_things(self, view, cam, things):
-        """Draws the things and returns the solid buildings drawn, as (depth, screen rect, image)."""
-        p = self.session.player
+    def draw_things(self, view, cam, things, p):
+        """Draws the things and returns the solid buildings drawn, as (depth, screen rect, image).
+        p: the car the view follows."""
         p_img = p.image()
         p_screen = cam.to_screen(p.pos)
         p_rect = p_img[0].get_rect(topleft=(p_screen.x - p_img[1][0], p_screen.y - p_img[1][1]))
         p_rect.inflate_ip(8 * ZOOM, 8 * ZOOM)
         p_depth = p.pos.x + p.pos.y
 
-        # buildings standing between the camera and the player are drawn see-through, whole lot at once
+        # buildings standing between the camera and the car are drawn see-through, whole lot at once
         ox, oy = -cam.ox, -cam.oy
         hiding = set()
         for depth, _, kind, obj in things:

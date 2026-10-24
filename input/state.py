@@ -32,3 +32,4 @@ RESTART = "restart"
 RESET = "reset"       # put the car back on the track
 TIME_BACK = "time_back"   # debug: clock back an hour
 TIME_FWD = "time_fwd"     # debug: clock on an hour
+JOIN = "join"             # 2 / F2: player 2 joins or leaves (in the menu)

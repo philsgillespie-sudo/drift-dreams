@@ -67,6 +67,7 @@ class Gamepad:
         else:
             self.dev = pygame.joystick.Joystick(index)
             self.name = self.dev.get_name()
+        self.id = pygame.joystick.Joystick(index).get_instance_id()   # rises with each connection
         # buttons already held when the pad connects shouldn't count as presses
         self._held = self._pressed_now()
 

@@ -23,6 +23,11 @@ def bezier(a, c, b, t):
     return a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
 
 
+def seen(cams, pos):
+    """Whether any of the cameras can see pos."""
+    return any(cam.visible(pos, 80) for cam in cams)
+
+
 def lane_crossing(b, dv, nv):
     """Where the lane into junction b (travelling dv) crosses the lane out of it (travelling nv)."""
     r1, r2 = right_of(dv) * LANE, right_of(nv) * LANE
@@ -45,7 +50,6 @@ class TrafficCar(Car):
         self.wait = 0.0         # time spent stopped behind something
         self.pushy = 0.0        # ignores the car in front for a moment after waiting too long
         self.stuck = 0.0
-        self.near_miss_t = 0.0
 
     # -- planning ------------------------------------------------------------
     def place(self, a, b):
@@ -182,47 +186,48 @@ class Traffic:
         """Share of the pool to keep on the road. Cars join and leave out of sight, one a frame."""
         self.density = max(0.0, min(1.0, share))
 
-    def _balance(self, player, cam):
+    def _balance(self, players, cams):
         want = round(len(self.pool) * self.density)
         if len(self.cars) > want:
             for car in self.cars:
-                if not cam.visible(car.pos, 80):
+                if not seen(cams, car.pos):
                     self.cars.remove(car)
                     break
         elif len(self.cars) < want:
             car = next(c for c in self.pool if c not in self.cars)
-            if self.spawn(car, player.pos, cam):
+            if self.spawn(car, self.rng.choice(players).pos, cams):
                 self.cars.append(car)
 
-    def spawn(self, car, player_pos, cam, near=SPAWN_NEAR, far=SPAWN_FAR):
+    def spawn(self, car, player_pos, cams=(), near=SPAWN_NEAR, far=SPAWN_FAR):
+        """Put the car on a road near..far from player_pos, out of sight of every camera."""
         for _ in range(40):
             car.place(*self.rng.choice(self.edges))
             dist = car.pos.distance_to(player_pos)
-            if not near <= dist <= far or (cam is not None and cam.visible(car.pos, 80)):
+            if not near <= dist <= far or seen(cams, car.pos):
                 continue
             if any(o is not car and o.pos.distance_to(car.pos) < 70 for o in self.cars):
                 continue
             return True
         return False
 
-    def update(self, dt, player, cam, grid):
-        """grid: a core.SpatialHash of every car, for finding the traffic round each one."""
+    def update(self, dt, players, cams, grid):
+        """players: the players' cars; cams: their cameras. grid: a core.SpatialHash of every car,
+        for finding the traffic round each one."""
         if not self._spawned:
             for car in self.cars:
-                self.spawn(car, player.pos, cam, 120, SPAWN_FAR)
+                self.spawn(car, players[0].pos, cams, 120, SPAWN_FAR)
             self._spawned = True
-            grid.rebuild([player] + self.cars + self.parked)
-        self._balance(player, cam)
+            grid.rebuild(players + self.cars + self.parked)
+        self._balance(players, cams)
         for car in self.cars:
-            far = car.pos.distance_to(player.pos) > DESPAWN
-            if far or (car.stuck > 4 and not cam.visible(car.pos, 80)):
-                self.spawn(car, player.pos, cam)
+            far = all(car.pos.distance_to(p.pos) > DESPAWN for p in players)
+            if far or (car.stuck > 4 and not seen(cams, car.pos)):
+                self.spawn(car, self.rng.choice(players).pos, cams)
                 continue
             p = car.pos
             near = [o for o in grid.near(p, LOOK_AHEAD) if o is not car
                     and abs(o.pos.x - p.x) < LOOK_AHEAD and abs(o.pos.y - p.y) < LOOK_AHEAD]
             car.drive(dt, near)
-            car.near_miss_t = max(0.0, car.near_miss_t - dt)
         for car in self.parked:
             if car.vel.length_squared() > 1:
                 car.drive(dt, ())

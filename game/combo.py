@@ -17,6 +17,8 @@ DRIFT_SLIP = 0.15
 
 
 class Combo:
+    """One player's combo; the events it hears are filtered to that player's car."""
+
     def __init__(self, bus, daynight, player):
         self.bus, self.daynight, self.player = bus, daynight, player
         self.score = 0
@@ -25,35 +27,55 @@ class Combo:
         self.mult = 1
         self.chain = 0.0
         self.was_drifting = False
-        bus.subscribe(PropSmashed, self._on_smash)
-        bus.subscribe(Crashed, lambda e: self.lose("CRASHED - COMBO LOST"))
-        bus.subscribe(PlayerPlaced, lambda e: self.lose(None))
-        bus.subscribe(CarsCollided, self._on_cars)
+        self.cooldowns = {}    # traffic car -> seconds until it can be near-missed again
+        self._handlers = [(PropSmashed, self._on_smash), (Crashed, self._on_crash),
+                          (PlayerPlaced, self._on_placed), (CarsCollided, self._on_cars)]
+        for event_type, handler in self._handlers:
+            bus.subscribe(event_type, handler)
+
+    def detach(self):
+        """Stop listening (the player left)."""
+        for event_type, handler in self._handlers:
+            self.bus.unsubscribe(event_type, handler)
 
     def add(self, pts, msg=None, color=(120, 220, 255)):
         self.pending += pts
         self.chain = max(self.chain, CHAIN)
         if msg:
-            self.bus.publish(Message(msg, color))
+            self.bus.publish(Message(msg, color, self.player))
 
     def lose(self, msg):
         if msg and self.pending > 0:
-            self.bus.publish(Message(msg, (255, 90, 90)))
+            self.bus.publish(Message(msg, (255, 90, 90), self.player))
         self.pending = 0.0
         self.mult = 1
         self.chain = 0.0
 
     def _on_smash(self, e):
-        pts = e.prop.type.points
-        self.add(pts, f"+{pts} SMASH", (255, 180, 90))
+        if e.car is self.player:
+            pts = e.prop.type.points
+            self.add(pts, f"+{pts} SMASH", (255, 180, 90))
+
+    def _on_crash(self, e):
+        if e.car is self.player:
+            self.lose("CRASHED - COMBO LOST")
+
+    def _on_placed(self, e):
+        if e.car is self.player:
+            self.lose(None)
 
     def _on_cars(self, e):
         if self.player in (e.a, e.b):
             other = e.b if e.a is self.player else e.a
-            if hasattr(other, "near_miss_t"):
-                other.near_miss_t = NEAR_MISS_COOLDOWN   # a hit is not a near miss
+            self.cooldowns[other] = NEAR_MISS_COOLDOWN   # a hit is not a near miss
 
     def update(self, dt, traffic):
+        cool = self.cooldowns
+        for car, t in list(cool.items()):
+            if t > dt:
+                cool[car] = t - dt
+            else:
+                del cool[car]
         self._near_misses(traffic)
         self._drift(dt)
 
@@ -61,12 +83,13 @@ class Combo:
         p = self.player
         if p.vel.length() < NEAR_MISS_SPEED:
             return
+        cool = self.cooldowns
         for car in traffic:
-            if car.near_miss_t > 0:
+            if car in cool:
                 continue
             d = car.pos.distance_to(p.pos)
             if 2 * CAR_RADIUS < d < 2 * CAR_RADIUS + NEAR_MISS_GAP:
-                car.near_miss_t = NEAR_MISS_COOLDOWN
+                cool[car] = NEAR_MISS_COOLDOWN
                 self.add(NEAR_MISS_POINTS, f"+{NEAR_MISS_POINTS} NEAR MISS")
 
     def _drift(self, dt):
@@ -93,6 +116,6 @@ class Combo:
         self.score += pts
         self.best = max(self.best, pts)
         self.bus.publish(Message(f"+{pts}" + (f"  x{self.mult}" if self.mult > 1 else "")
-                                 + ("  NIGHT" if night else ""), (120, 255, 140)))
+                                 + ("  NIGHT" if night else ""), (120, 255, 140), self.player))
         self.pending = 0.0
         self.mult = 1

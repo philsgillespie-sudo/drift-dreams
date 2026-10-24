@@ -28,10 +28,12 @@ class Text:
             self._cache.popitem(last=False)
         return hit
 
-    def draw(self, s, size, color, pos, anchor="topleft", shadow=True):
+    def draw(self, s, size, color, pos, anchor="topleft", shadow=True, dst=None):
+        """dst: the surface to draw on (default: the screen)."""
+        dst = dst or self.screen
         img, back = self.render(s, size, color, shadow)
         rect = img.get_rect(**{anchor: pos})
         if back is not None:
-            self.screen.blit(back, rect.move(2, 2))
-        self.screen.blit(img, rect)
+            dst.blit(back, rect.move(2, 2))
+        dst.blit(img, rect)
         return rect

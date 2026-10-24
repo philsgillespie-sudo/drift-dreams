@@ -1,10 +1,11 @@
 """Headless frame-time profile: drives the player round the city and reports how long frames take.
 
-    py tools/frame_profile.py [--frames N] [--hour H] [--cprofile]
+    py tools/frame_profile.py [--frames N] [--hour H] [--players 1|2] [--cprofile]
 
 Runs with SDL's dummy video and audio drivers, so no window opens. Frame time is update + draw
 (the event pump is timed apart: SDL device handling can stall it). The player is put back on the
 road every 400 frames; those teleport frames bake a screenful of ground and are left out of "max".
+--players 2 adds player 2 (drawn to their own window too), driving a different line.
 --cprofile also prints the 30 costliest calls.
 """
 import argparse
@@ -35,19 +36,27 @@ def pilot(game):
     return DriveControls(throttle=1.0, steer=1.0 if int(t / 3) % 3 == 0 else 0.0, handbrake=int(t * 2) % 5 == 0)
 
 
+def pilot2(game):
+    """Like pilot, but turning the other way on its own rhythm, so the two players split up."""
+    t = game.time
+    return DriveControls(throttle=1.0, steer=-1.0 if int(t / 4) % 3 == 1 else 0.0, handbrake=int(t * 2) % 7 == 0)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--frames", type=int, default=1500)
     ap.add_argument("--hour", type=float, default=20.0, help="time of day; night adds the lighting pass")
+    ap.add_argument("--players", type=int, choices=(1, 2), default=1)
     ap.add_argument("--cprofile", action="store_true")
     args = ap.parse_args()
 
     t0 = time.perf_counter()
-    g = Game(start_hour=args.hour)
+    g = Game(start_hour=args.hour, players=args.players)
     print(f"startup {time.perf_counter() - t0:.2f}s")
     g.change_scene("drive")
     g.started = True
     g.autopilot = pilot
+    g.autopilot2 = pilot2
 
     prof = cProfile.Profile() if args.cprofile else None
     frames, updates, draws, pumps = [], [], [], []
@@ -69,7 +78,8 @@ def main():
         if f % TELEPORT_EVERY > 2:
             steady.append(frames[-1])
         if f % TELEPORT_EVERY == TELEPORT_EVERY - 1:
-            g.session.to_road()
+            for p in g.players:
+                g.session.to_road(p)
     if prof:
         prof.disable()
 

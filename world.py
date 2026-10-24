@@ -145,6 +145,12 @@ class World:
         for d in self.districts:
             d.draw_fresh_marks(dst, cam)
 
+    def end_frame(self, cams):
+        """Call once a frame after drawing every view: the districts' background baking."""
+        views = [cam.view for cam in cams]
+        for d in self.districts:
+            d.end_frame(views)
+
     def visible_objects(self, view, extra_top=0):
         """Buildings, scenery and decorations that may show in `view`: ("building", BuildingBlock),
         ("static", kind, pos, angle), ("deco", name, depth, rect). extra_top: how far scenery can

@@ -47,7 +47,9 @@ class SoundManager:
     Cars are duck-typed: anything with pos, vel, throttle, slip, drifting,
     surface and on_kerb works. Call update() once a frame;
     it runs the player's engine, tyre and surface loops and the nearest rival's
-    engine. Call play() for other events. Everything is a no-op if no audio device could be opened.
+    engine (with two players: both players' engines, and the tyre and surface loops
+    of whichever is louder). Sounds are heard from the nearest player.
+    Call play() for other events. Everything is a no-op if no audio device could be opened.
     """
 
     @staticmethod
@@ -58,9 +60,9 @@ class SoundManager:
     def __init__(self, sfx_dir):
         self.enabled = pygame.mixer.get_init() is not None
         self.sounds = {}
-        self.listener = None
+        self.listeners = []
         self.cars = weakref.WeakKeyDictionary()
-        self.engine_vol = [0.0, 0.0]  # player, rival
+        self.engine_vol = [0.0, 0.0]  # player, rival (or player 2)
         if not self.enabled:
             return
         ladder = []
@@ -83,16 +85,17 @@ class SoundManager:
         self.kerb = Loop(ch[7], self.sounds.get("kerb_rumble_loop"))
 
     def _spatial(self, pos):
-        """(left, right) gains for a sound at pos, heard from the listener."""
-        if self.listener is None:
+        """(left, right) gains for a sound at pos, heard from the nearest listener."""
+        if not self.listeners:
             return 1.0, 1.0
-        d = V(pos) - self.listener
+        pos = V(pos)
+        d = pos - min(self.listeners, key=pos.distance_squared_to)
         gain = clamp(1 - d.length() / HEARING) ** 2
         pan = clamp((d.x - d.y) / PAN_WIDTH, -1.0, 1.0)  # iso view: screen x is world x - y
         return gain * min(1.0, 1 - 0.7 * pan), gain * min(1.0, 1 + 0.7 * pan)
 
     def play(self, name, volume=1.0, pos=None):
-        """One-shot. With pos it's attenuated and panned relative to the player."""
+        """One-shot. With pos it's attenuated and panned relative to the nearest player."""
         snd = self.sounds.get(name) if self.enabled else None
         if snd is None or snd.get_num_channels() >= MAX_VOICES:
             return
@@ -103,12 +106,12 @@ class SoundManager:
         if ch is not None:
             ch.set_volume(volume * left * MASTER, volume * right * MASTER)
 
-    def update(self, dt, player, opponents, listening=True):
-        """listening=False (menus) fades every loop out and skips one-shots."""
+    def update(self, dt, players, opponents, listening=True):
+        """players: the players' cars. listening=False (menus) fades every loop out and skips one-shots."""
         if not self.enabled:
             return
-        self.listener = V(player.pos)
-        for car in [player, *opponents]:
+        self.listeners = [V(p.pos) for p in players]
+        for car in [*players, *opponents]:
             st = self.cars.setdefault(car, _CarState())
             speed = car.vel.length()
             st.throttle += (car.throttle - st.throttle) * min(1.0, 6 * dt)
@@ -116,21 +119,32 @@ class SoundManager:
             st.rpm += (want - st.rpm) * min(1.0, (12 if want > st.rpm else 6) * dt)
 
         on = 1.0 if listening else 0.0
-        speed = player.vel.length()
+        player = players[0]
         if self.engines:
             vol = self.engine_vol
             vol[0] += ((0.65 + 0.35 * self.cars[player].throttle) * on - vol[0]) * min(1.0, 8 * dt)
             self.engines[0].update(self.cars[player].rpm, vol[0] * MASTER, vol[0] * MASTER)
-            rival = min(opponents, key=lambda c: c.pos.distance_squared_to(player.pos), default=None)
-            vol[1] += (0.7 * on - vol[1]) * min(1.0, 8 * dt)
+            if len(players) > 1:
+                rival = players[1]
+                loud = 0.65 + 0.35 * self.cars[rival].throttle
+            else:
+                rival = min(opponents, key=lambda c: c.pos.distance_squared_to(player.pos), default=None)
+                loud = 0.7
+            vol[1] += (loud * on - vol[1]) * min(1.0, 8 * dt)
             left, right = self._spatial(rival.pos) if rival is not None else (0.0, 0.0)
             rpm = self.cars[rival].rpm if rival is not None else IDLE_RPM
             self.engines[1].update(rpm, vol[1] * left * MASTER, vol[1] * right * MASTER)
 
-        road = player.surface == "road"
-        slide = clamp((abs(player.slip) - 0.12) / 0.35) * clamp((speed - 60) / 150)
-        self.screech.fade_to(0.8 * slide * road * on, dt)
-        moving = clamp(speed / 225)
-        self.gravel.fade_to(0.9 * moving * (player.surface == "gravel") * on, dt)
-        self.grass.fade_to(0.8 * moving * (player.surface == "grass") * on, dt)
-        self.kerb.fade_to(0.9 * clamp(speed / 150) * player.on_kerb * on, dt, rate=20)
+        screech = gravel = grass = kerb = 0.0
+        for p in players:
+            speed = p.vel.length()
+            slide = clamp((abs(p.slip) - 0.12) / 0.35) * clamp((speed - 60) / 150)
+            moving = clamp(speed / 225)
+            screech = max(screech, 0.8 * slide * (p.surface == "road"))
+            gravel = max(gravel, 0.9 * moving * (p.surface == "gravel"))
+            grass = max(grass, 0.8 * moving * (p.surface == "grass"))
+            kerb = max(kerb, 0.9 * clamp(speed / 150) * p.on_kerb)
+        self.screech.fade_to(screech * on, dt)
+        self.gravel.fade_to(gravel * on, dt)
+        self.grass.fade_to(grass * on, dt)
+        self.kerb.fade_to(kerb * on, dt, rate=20)

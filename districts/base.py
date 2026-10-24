@@ -19,7 +19,8 @@ T = 32
 CHUNK = 8           # ground is baked in CHUNK x CHUNK tile pieces
 TILE_W, TILE_H = 64 * ZOOM, 32 * ZOOM   # one ground tile on screen
 COLORKEY = (255, 0, 255)
-CHUNK_CACHE = 40    # baked ground chunks kept per district, least recently drawn dropped first
+CHUNK_CACHE = 80    # baked ground chunks kept per district, least recently drawn dropped first
+                    # (room for two players' views far apart)
 PREFETCH = (CHUNK * TILE_W // 2, CHUNK * TILE_H // 2)   # bake ahead within this much past the view
 MARKS_PER_CHUNK = 600   # skid marks remembered per chunk (for re-baking)
 MARK_WIDTH = 2 * ZOOM - 1
@@ -70,6 +71,7 @@ class District:
         self._marks = {}                                     # chunk -> deque of (a, b, colour)
         self._fresh_marks = {}                               # baked chunk -> [first frame, marks not on it yet]
         self._frame = 0
+        self._baked = False                                  # whether this frame has baked a chunk yet
         self._block_images = OrderedDict()
 
     def finish(self):
@@ -212,22 +214,26 @@ class District:
                 gone, _ = cache.popitem(last=False)
                 self._fresh_marks.pop(gone, None)    # painted in again if it's ever re-baked
             surf = cache[key] = self._bake_chunk(*key)
+            self._baked = True
         else:
             cache.move_to_end(key)
         return surf
 
     def draw_ground(self, dst, cam):
-        self._frame += 1
-        view = cam.view
-        baked_before = len(self._chunk_cache)
         rects, cw = self._chunk_rects, self.chunks_w
-        for key in self.visible_chunks(view):
+        for key in self.visible_chunks(cam.view):
             surf = self._chunk_surface(key)
             r = rects[key[1] * cw + key[0]]
             dst.blit(surf, (r.x - cam.ox, r.y - cam.oy))
-        # at most one more slow job a frame, and only on a frame that hasn't had one
-        if len(self._chunk_cache) == baked_before and not self._settle_marks() and not self._prefetch(view):
-            self._prefetch_blocks(view)
+
+    def end_frame(self, views):
+        """Once a frame, after every view's ground is drawn: at most one more slow job, and only on
+        a frame that hasn't had one. views: the rects of the screens drawn this frame."""
+        self._frame += 1
+        if not self._baked and not self._settle_marks():
+            if not any(self._prefetch(v) for v in views):
+                any(self._prefetch_blocks(v) for v in views)
+        self._baked = False
 
     def draw_fresh_marks(self, dst, cam):
         """Marks not yet painted into their chunk, drawn over the ground."""

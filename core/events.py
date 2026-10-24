@@ -12,6 +12,9 @@ class EventBus:
     def subscribe(self, event_type, handler):
         self._handlers[event_type].append(handler)
 
+    def unsubscribe(self, event_type, handler):
+        self._handlers[event_type].remove(handler)
+
     def publish(self, event):
         for handler in self._handlers.get(type(event), ()):
             handler(event)

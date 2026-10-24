@@ -25,18 +25,21 @@ class PropKnocked:
 
 @dataclass
 class PropSmashed:
-    """The player smashed a prop hard enough to score it (once per prop)."""
+    """A player smashed a prop hard enough to score it (once per prop)."""
     prop: Any
+    car: Any               # the player's car that did it
 
 
 @dataclass
 class Crashed:
-    """The player crashed hard: the combo is lost."""
+    """A player crashed hard: their combo is lost."""
+    car: Any
 
 
 @dataclass
 class PlayerPlaced:
-    """The player was put back somewhere (onto the road, or the start)."""
+    """A player was put back somewhere (onto the road, or the start)."""
+    car: Any
 
 
 @dataclass
@@ -44,3 +47,4 @@ class Message:
     """A line of text popping up over the drive."""
     text: str
     color: tuple = (200, 200, 255)
+    car: Any = None        # whose screen it shows on; None for everyone
