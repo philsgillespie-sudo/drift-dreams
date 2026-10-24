@@ -10,9 +10,10 @@ import math
 import pygame
 from pygame.math import Vector2 as V
 
-from city import BLOCKS, EDGE, road_start
-from district import T, District
 from iso import ZOOM, iso
+
+from .base import T, District
+from .city import BLOCKS, EDGE, node_key, road_start
 
 DECK = 80                    # deck length in tiles, from the district's west edge
 ISLAND = 16                  # tiles of island past the deck
@@ -22,6 +23,7 @@ RAIL_TOP = 13                # top of the railing
 SAG = 18                     # lowest point of the main span's cables
 CABLE = (200, 70, 44)
 HANGER = (150, 52, 34)
+END_NODE = ("bridge", "end")  # where the road stops on the island, short of the drift pad's cones
 
 
 def lay_deck(d, li, row, k):
@@ -120,9 +122,10 @@ class Bridge(District):
             box = pygame.Rect(main[0], (0, 0)).unionall([pygame.Rect(p, (1, 1)) for p in main])
             self.cables[side] = (main, hangers, box.inflate(8, 8))
 
-    def nearest_road(self, p):
-        x = min(max(p[0], self.ox * T), (self.ox + DECK + 2) * T)
-        return V(x, (self.row + 2.5) * T), math.pi / 2
+    def add_roads(self, graph):
+        """The deck road: from the city's east junction on the middle road out to the island."""
+        graph.add_node(END_NODE, V((self.ox + DECK + 2.5) * T, (self.row + 2.5) * T))
+        graph.connect(node_key(BLOCKS, BLOCKS // 2), END_NODE)
 
     def draw_cables(self, dst, cam, side):
         main, hangers, box = self.cables[side]

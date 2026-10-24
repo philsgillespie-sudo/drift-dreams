@@ -1,16 +1,18 @@
-"""Traffic: AI cars keeping to the right-hand lanes of the street grid, plus parked cars."""
-import math
+"""Traffic: AI cars keeping to the right-hand lanes of the road network, plus parked cars.
+
+Cars only know the roads.RoadGraph, so they drive every district's roads alike.
+"""
 import random
 
 from pygame.math import Vector2 as V
 
 from car import Car, heading_of, wrap_angle
-from city import BLOCKS, EDGE, LANE, PITCH, T, node_pos
 
-DIRS = [V(1, 0), V(0, 1), V(-1, 0), V(0, -1)]
+LANE = 24              # lane centre's offset from the road's centre line
 APPROACH = 56          # waypoint distance from an intersection's centre
 TURN_SPEED = 80
 SPAWN_NEAR, SPAWN_FAR, DESPAWN = 500, 1100, 1400
+LOOK_AHEAD = 100       # how far round itself a car looks for traffic
 
 
 def right_of(d):
@@ -21,13 +23,23 @@ def bezier(a, c, b, t):
     return a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
 
 
+def lane_crossing(b, dv, nv):
+    """Where the lane into junction b (travelling dv) crosses the lane out of it (travelling nv)."""
+    r1, r2 = right_of(dv) * LANE, right_of(nv) * LANE
+    rhs = r2 - r1
+    det = nv.x * dv.y - dv.x * nv.y
+    t = (nv.x * rhs.y - rhs.x * nv.y) / det
+    return b + r1 + dv * t
+
+
 class TrafficCar(Car):
-    def __init__(self, stack, rng):
+    def __init__(self, stack, rng, roads):
         super().__init__(V(), 0.0, stack)
         self.rng = rng
+        self.roads = roads
         self.path = []          # [(point, speed)]
-        self.node = (0, 0)
-        self.dir = 0
+        self.prev = self.node = None   # the junction behind and the one ahead
+        self.dv = V(1, 0)       # direction of the road being driven
         self.cruise = 160
         self.dazed = 0.0
         self.wait = 0.0         # time spent stopped behind something
@@ -36,70 +48,57 @@ class TrafficCar(Car):
         self.near_miss_t = 0.0
 
     # -- planning ------------------------------------------------------------
-    def place(self, a, b, d):
-        """Put the car in the lane leaving node (a, b) in direction d, somewhere along the block."""
-        dv = DIRS[d]
-        start = node_pos(a, b)
-        self.pos = start + dv * self.rng.uniform(70, PITCH * T - 70) + right_of(dv) * LANE
+    def place(self, a, b):
+        """Put the car in the lane from junction a toward b, somewhere along the road."""
+        pa, pb = self.roads.pos(a), self.roads.pos(b)
+        dv = (pb - pa).normalize()
+        self.pos = pa + dv * self.rng.uniform(70, max(70.0, pa.distance_to(pb) - 70)) + right_of(dv) * LANE
         self.heading = heading_of(dv)
         self.cruise = self.rng.uniform(130, 185)
         self.vel = dv * self.cruise * 0.8
         self.angvel = self.steer = 0.0
         self.drifting = False
         self.dazed = self.wait = self.pushy = self.stuck = 0.0
-        self.node = (a + int(dv.x), b + int(dv.y))
-        self.dir = d
-        self.path = [(self._approach(self.node, dv), self.cruise)]
+        self.prev, self.node, self.dv = a, b, dv
+        self.path = [(self._approach(b, dv), self.cruise)]
 
     def _approach(self, node, dv):
-        return node_pos(*node) - dv * APPROACH + right_of(dv) * LANE
-
-    @staticmethod
-    def valid(node):
-        return 0 <= node[0] <= BLOCKS and 0 <= node[1] <= BLOCKS
+        return self.roads.pos(node) - dv * APPROACH + right_of(dv) * LANE
 
     def _plan_turn(self):
-        """At the current node: pick a way on and queue the waypoints through the junction."""
-        d = self.dir
-        options = []
-        for nd, w in ((d, 2.0), ((d + 1) % 4, 1.0), ((d + 3) % 4, 1.0)):
-            nxt = (self.node[0] + int(DIRS[nd].x), self.node[1] + int(DIRS[nd].y))
-            if self.valid(nxt):
-                options += [nd] * int(w * 2)
-        if not options:
-            nd = (d + 2) % 4   # dead end at the edge of the map: U-turn
+        """At the junction ahead: pick a way on and queue the waypoints through it."""
+        roads, node, dv = self.roads, self.node, self.dv
+        b = roads.pos(node)
+        options, weights = [], []
+        for n in roads.neighbours(node):
+            if n == self.prev:
+                continue
+            nv = (roads.pos(n) - b).normalize()
+            options.append((n, nv))
+            weights.append(2.0 if nv.dot(dv) > 0.7 else 1.0)   # straight on is likelier than turning
+        if options:
+            n, nv = self.rng.choices(options, weights)[0]
         else:
-            nd = self.rng.choice(options)
-        dv, nv = DIRS[d], DIRS[nd]
-        b = node_pos(*self.node)
+            n, nv = self.prev, -dv   # dead end: U-turn
         entry = b - dv * APPROACH + right_of(dv) * LANE
         exit_ = b + nv * APPROACH + right_of(nv) * LANE
-        if nd == d:
+        turn = nv.dot(dv)
+        if turn > 0.99:
             self.path.append((exit_, self.cruise))
         else:
             # corner where the two lane lines cross, as a Bezier control point
-            if nd == (d + 2) % 4:
-                corner = b + dv * APPROACH * 0.6
-            else:
-                corner = b + right_of(dv) * LANE + dv * (LANE if nd == (d + 3) % 4 else -LANE)
+            corner = b + dv * APPROACH * 0.6 if turn < -0.99 else lane_crossing(b, dv, nv)
             for t in (0.35, 0.7, 1.0):
                 self.path.append((bezier(entry, corner, exit_, t), TURN_SPEED))
-        self.node = (self.node[0] + int(nv.x), self.node[1] + int(nv.y))
-        self.dir = nd
-        self.path.append((self._approach(self.node, nv), self.cruise))
+        self.prev, self.node, self.dv = node, n, nv
+        self.path.append((self._approach(n, nv), self.cruise))
 
     def replan(self):
-        """After being knocked about: head for the next junction in the way it's facing."""
-        f = self.fwd()
-        d = max(range(4), key=lambda k: DIRS[k].dot(f))
-        fx = (self.pos.x / T - EDGE - 1.5) / PITCH
-        fy = (self.pos.y / T - EDGE - 1.5) / PITCH
-        dv = DIRS[d]
-        a = math.floor(fx) + 1 if dv.x > 0 else math.ceil(fx) - 1 if dv.x < 0 else round(fx)
-        b = math.floor(fy) + 1 if dv.y > 0 else math.ceil(fy) - 1 if dv.y < 0 else round(fy)
-        node = (min(BLOCKS, max(0, a)), min(BLOCKS, max(0, b)))
-        self.node, self.dir = node, d
-        self.path = [(self._approach(node, dv), self.cruise)]
+        """After being knocked about: head for the next junction on the road it's facing along."""
+        a, b = self.roads.edge_ahead(self.pos, self.fwd())
+        self.prev, self.node = a, b
+        self.dv = (self.roads.pos(b) - self.roads.pos(a)).normalize()
+        self.path = [(self._approach(b, self.dv), self.cruise)]
 
     # -- driving ---------------------------------------------------------------
     def drive(self, dt, others):
@@ -131,8 +130,6 @@ class TrafficCar(Car):
         blocked = False
         if self.pushy <= 0:
             for o in others:
-                if o is self:
-                    continue
                 rel = o.pos - self.pos
                 ahead = rel.dot(f)
                 if 0 < ahead < 90 and abs(rel.dot(r)) < 20:
@@ -161,16 +158,18 @@ class TrafficCar(Car):
 
 class ParkedCar(Car):
     """Sits in its bay until something shoves it."""
+    parked = True
 
     def drive(self, dt, others):
         self.update(dt, 0, 0, 0, True)
 
 
 class Traffic:
-    def __init__(self, stacks, parked_spots, count=28, seed=3):
+    def __init__(self, stacks, parked_spots, roads, count=28, seed=3):
         self.rng = random.Random(seed)
         self.stacks = stacks
-        self.pool = [TrafficCar(self.rng.choice(stacks), self.rng) for _ in range(count)]
+        self.edges = roads.directed_edges()
+        self.pool = [TrafficCar(self.rng.choice(stacks), self.rng, roads) for _ in range(count)]
         self.cars = list(self.pool)   # the ones on the road; the rest wait off the map
         self.parked = [ParkedCar(p, h, self.rng.choice(stacks)) for p, h in parked_spots]
         self.density = 1.0
@@ -197,12 +196,7 @@ class Traffic:
 
     def spawn(self, car, player_pos, cam, near=SPAWN_NEAR, far=SPAWN_FAR):
         for _ in range(40):
-            a, b = self.rng.randint(0, BLOCKS), self.rng.randint(0, BLOCKS)
-            d = self.rng.randrange(4)
-            nxt = (a + int(DIRS[d].x), b + int(DIRS[d].y))
-            if not TrafficCar.valid(nxt):
-                continue
-            car.place(a, b, d)
+            car.place(*self.rng.choice(self.edges))
             dist = car.pos.distance_to(player_pos)
             if not near <= dist <= far or (cam is not None and cam.visible(car.pos, 80)):
                 continue
@@ -211,20 +205,22 @@ class Traffic:
             return True
         return False
 
-    def update(self, dt, player, cam):
+    def update(self, dt, player, cam, grid):
+        """grid: a core.SpatialHash of every car, for finding the traffic round each one."""
         if not self._spawned:
             for car in self.cars:
                 self.spawn(car, player.pos, cam, 120, SPAWN_FAR)
             self._spawned = True
+            grid.rebuild([player] + self.cars + self.parked)
         self._balance(player, cam)
-        everyone = self.cars + self.parked + [player]
         for car in self.cars:
             far = car.pos.distance_to(player.pos) > DESPAWN
             if far or (car.stuck > 4 and not cam.visible(car.pos, 80)):
                 self.spawn(car, player.pos, cam)
                 continue
-            near = [o for o in everyone if o is not car and abs(o.pos.x - car.pos.x) < 100
-                    and abs(o.pos.y - car.pos.y) < 100]
+            p = car.pos
+            near = [o for o in grid.near(p, LOOK_AHEAD) if o is not car
+                    and abs(o.pos.x - p.x) < LOOK_AHEAD and abs(o.pos.y - p.y) < LOOK_AHEAD]
             car.drive(dt, near)
             car.near_miss_t = max(0.0, car.near_miss_t - dt)
         for car in self.parked:

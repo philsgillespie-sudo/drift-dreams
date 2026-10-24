@@ -10,8 +10,9 @@ import random
 import pygame
 from pygame.math import Vector2 as V
 
-from district import TILE_H, TILE_W, T, District
 from iso import ZOOM
+
+from .base import TILE_H, TILE_W, T, District
 
 BLOCKS = 9          # city blocks along each axis
 ROAD = 3            # road width in tiles
@@ -20,7 +21,6 @@ PITCH = ROAD + 1 + INNER + 1
 EDGE = 6            # beach and sea around the land
 SIZE = EDGE * 2 + ROAD + BLOCKS * PITCH
 FLOOR_H = 24 * ZOOM  # one building floor in pixels
-LANE = 24           # lane centre's offset from the road's centre line
 
 
 def road_start(k):
@@ -47,6 +47,11 @@ def node_pos(a, b):
     return V((road_start(a) + 1.5) * T, (road_start(b) + 1.5) * T)
 
 
+def node_key(a, b):
+    """The road graph's key for the junction of road column a and road row b."""
+    return ("city", a, b)
+
+
 class Lot:
     def __init__(self, style, floors, shop, mid, tiles):
         self.style, self.floors, self.shop, self.mid = style, floors, shop, mid
@@ -54,11 +59,10 @@ class Lot:
 
 
 class City(District):
-    def __init__(self, tiles, buildings, scenery, seed=7):
+    def __init__(self, tiles, buildings, seed=7):
         super().__init__(0, 0, SIZE, SIZE, tiles)
         self.rng = random.Random(seed)
         self.bframes = buildings
-        self.scenery = scenery          # kind -> IsoStack
         self.block_type = {}
         self._bcache = {}
         self._layout()
@@ -237,24 +241,23 @@ class City(District):
         for k in range(5):
             self.prop_spots.append(("cone", V((x0 + 1.5 + k * 1.25) * T, (y0 + 4) * T)))
 
-    # -- queries -------------------------------------------------------------
-    def nearest_road(self, p):
-        """Centre of the nearest lane, and the heading along it, for putting a car back."""
-        best = None
-        for k in range(BLOCKS + 1):
-            c = (road_start(k) + 1.5) * T
-            lo, hi = road_start(0) * T, (road_start(BLOCKS) + ROAD) * T
-            # road along x at y = c, road along y at x = c
-            for pt, heading in ((V(min(max(p.x, lo), hi), c), math.pi / 2),
-                                (V(c, min(max(p.y, lo), hi)), 0.0)):
-                d = pt.distance_squared_to(p)
-                if best is None or d < best[0]:
-                    best = (d, pt, heading)
-        return best[1], best[2]
+    # -- roads -----------------------------------------------------------------
+    def add_roads(self, graph):
+        """A junction where every road column crosses every road row, joined to its neighbours."""
+        for b in range(BLOCKS + 1):
+            for a in range(BLOCKS + 1):
+                graph.add_node(node_key(a, b), node_pos(a, b))
+        for b in range(BLOCKS + 1):
+            for a in range(BLOCKS + 1):
+                if a < BLOCKS:
+                    graph.connect(node_key(a, b), node_key(a + 1, b))
+                if b < BLOCKS:
+                    graph.connect(node_key(a, b), node_key(a, b + 1))
 
     # -- drawing -------------------------------------------------------------
-    def building_image(self, i, j, faded=False):
-        """The whole stack for one building tile and the row of its ground diamond's top corner."""
+    def building_image(self, i, j):
+        """The whole stack for one building tile and the row of its ground diamond's top corner.
+        Tiles that look alike share one image."""
         lot, rims, clutter = self.buildings[(i, j)]
         ground = "shop" if lot.shop else "base"
         key = (lot.style, ground, lot.mid, lot.floors, rims, clutter)
@@ -271,7 +274,5 @@ class City(District):
                 surf.blit(f["rim_" + side], (0, 0))
             if clutter:
                 surf.blit(f[clutter], (0, 0))
-            faded_surf = surf.copy()
-            faded_surf.set_alpha(96)
-            img = self._bcache[key] = (surf, faded_surf, gy)
-        return (img[1] if faded else img[0]), img[2]
+            img = self._bcache[key] = (surf.convert_alpha(), gy)
+        return img

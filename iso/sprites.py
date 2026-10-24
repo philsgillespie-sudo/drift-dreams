@@ -109,7 +109,7 @@ class IsoStack:
             for lift in range(lo, max(lo + 1, int((i + 1) * self.lift))):
                 surf.blit(flat[k], (0, top - lift))
         bbox = surf.get_bounding_rect()
-        return surf.subsurface(bbox).copy(), (ax - bbox.x, ay - bbox.y)
+        return _for_display(surf.subsurface(bbox).copy()), (ax - bbox.x, ay - bbox.y)
 
     def index(self, deg):
         return int(round(deg * self.steps / 360)) % self.steps
@@ -130,6 +130,12 @@ class IsoStack:
             del px
             out.images[k] = (s, anchor)
         return out
+
+
+def _for_display(surf):
+    """The surface in the display's pixel format, which blits several times faster, once there
+    is a display (the sprite tools use stacks without one)."""
+    return surf.convert_alpha() if pygame.display.get_surface() is not None else surf
 
 
 def blit_anchored(dst, img, pos):
